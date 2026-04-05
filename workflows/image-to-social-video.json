@@ -1,0 +1,789 @@
+{
+  "name": "Image to Multi-Video Social Media Publisher",
+  "nodes": [
+    {
+      "id": "sticky-intro",
+      "name": "📋 Hướng dẫn sử dụng",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [-400, -200],
+      "parameters": {
+        "content": "## 🎬 Image → Videos → Social Media\n\n**Luồng hoạt động:**\n1. Nhận ảnh qua Webhook (URL hoặc base64)\n2. Tạo nhiều video từ ảnh bằng RunwayML Gen-3\n3. Tự động đăng lên Facebook Reels & TikTok\n\n**Cần chuẩn bị:**\n- RunwayML API Key\n- Facebook Page Access Token\n- TikTok Access Token\n\n**Cách gọi:**\n```\nPOST /webhook/image-to-video\n{\n  \"imageUrl\": \"https://...\",\n  \"caption\": \"Nội dung caption #hashtag\",\n  \"videoPrompts\": [\n    \"Slow zoom in with soft light\",\n    \"Dynamic camera movement, cinematic\",\n    \"Gentle rotation, dreamy atmosphere\"\n  ]\n}\n```"
+      }
+    },
+    {
+      "id": "node-webhook",
+      "name": "📥 Nhận Ảnh (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [0, 0],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "image-to-video",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": false
+        }
+      }
+    },
+    {
+      "id": "node-validate",
+      "name": "✅ Validate & Chuẩn bị dữ liệu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [240, 0],
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body;\n\nif (!body.imageUrl) {\n  throw new Error('Thiếu imageUrl trong request body');\n}\n\nconst imageUrl = body.imageUrl;\nconst caption = body.caption || 'Video được tạo bởi AI 🤖';\nconst hashtags = body.hashtags || '#AI #Video #Reels';\nconst videoPrompts = body.videoPrompts || [\n  'Slow zoom in with soft cinematic light, 4K quality',\n  'Dynamic camera pan left to right, vibrant colors',\n  'Gentle floating animation, dreamy soft focus'\n];\n\n// Tạo danh sách items cho từng video cần tạo\nconst items = videoPrompts.map((prompt, index) => ({\n  json: {\n    imageUrl,\n    caption,\n    hashtags,\n    videoPrompt: prompt,\n    videoIndex: index + 1,\n    totalVideos: videoPrompts.length\n  }\n}));\n\nreturn items;"
+      }
+    },
+    {
+      "id": "node-split-batches",
+      "name": "🔄 Xử lý từng Video",
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [480, 0],
+      "parameters": {
+        "batchSize": 1,
+        "options": {}
+      }
+    },
+    {
+      "id": "sticky-runway",
+      "name": "🎥 RunwayML Section",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [680, -160],
+      "parameters": {
+        "content": "**RunwayML Gen-3 Alpha**\nTạo video từ ảnh với AI\nModel: gen3a_turbo (5s) hoặc gen3a (10s)\nAPI: https://api.runwayml.com/v1/"
+      }
+    },
+    {
+      "id": "node-generate-video",
+      "name": "🎬 Tạo Video (RunwayML)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 0],
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.runwayml.com/v1/image_to_video",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "model",
+              "value": "gen3a_turbo"
+            },
+            {
+              "name": "promptImage",
+              "value": "={{ $json.imageUrl }}"
+            },
+            {
+              "name": "promptText",
+              "value": "={{ $json.videoPrompt }}"
+            },
+            {
+              "name": "duration",
+              "value": "5"
+            },
+            {
+              "name": "ratio",
+              "value": "768:1280"
+            },
+            {
+              "name": "watermark",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false
+            }
+          }
+        }
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "runway-api-key",
+          "name": "RunwayML API Key"
+        }
+      }
+    },
+    {
+      "id": "node-store-task",
+      "name": "💾 Lưu Task ID",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [960, 0],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-taskid",
+              "name": "taskId",
+              "value": "={{ $json.id }}",
+              "type": "string"
+            },
+            {
+              "id": "field-imagurl",
+              "name": "imageUrl",
+              "value": "={{ $('✅ Validate & Chuẩn bị dữ liệu').item.json.imageUrl }}",
+              "type": "string"
+            },
+            {
+              "id": "field-caption",
+              "name": "caption",
+              "value": "={{ $('✅ Validate & Chuẩn bị dữ liệu').item.json.caption }}",
+              "type": "string"
+            },
+            {
+              "id": "field-hashtags",
+              "name": "hashtags",
+              "value": "={{ $('✅ Validate & Chuẩn bị dữ liệu').item.json.hashtags }}",
+              "type": "string"
+            },
+            {
+              "id": "field-index",
+              "name": "videoIndex",
+              "value": "={{ $('✅ Validate & Chuẩn bị dữ liệu').item.json.videoIndex }}",
+              "type": "number"
+            },
+            {
+              "id": "field-prompt",
+              "name": "videoPrompt",
+              "value": "={{ $('✅ Validate & Chuẩn bị dữ liệu').item.json.videoPrompt }}",
+              "type": "string"
+            },
+            {
+              "id": "field-poll-count",
+              "name": "pollCount",
+              "value": "=0",
+              "type": "number"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-wait-generation",
+      "name": "⏳ Chờ xử lý (45 giây)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [1200, 0],
+      "parameters": {
+        "amount": 45,
+        "unit": "seconds"
+      },
+      "webhookId": "wait-generation-webhook"
+    },
+    {
+      "id": "node-check-status",
+      "name": "🔍 Kiểm tra trạng thái Video",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1440, 0],
+      "parameters": {
+        "method": "GET",
+        "url": "=https://api.runwayml.com/v1/tasks/{{ $json.taskId }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "runway-api-key",
+          "name": "RunwayML API Key"
+        }
+      }
+    },
+    {
+      "id": "node-merge-status",
+      "name": "🔗 Merge dữ liệu",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 0],
+      "parameters": {
+        "jsCode": "const statusData = $input.first().json;\nconst storedData = $('💾 Lưu Task ID').first().json;\n\nconst status = statusData.status;\nlet videoUrl = null;\n\nif (status === 'SUCCEEDED' && statusData.output && statusData.output.length > 0) {\n  videoUrl = statusData.output[0];\n}\n\nreturn [{\n  json: {\n    taskId: storedData.taskId,\n    imageUrl: storedData.imageUrl,\n    caption: storedData.caption,\n    hashtags: storedData.hashtags,\n    videoIndex: storedData.videoIndex,\n    videoPrompt: storedData.videoPrompt,\n    status: status,\n    videoUrl: videoUrl,\n    pollCount: (storedData.pollCount || 0) + 1,\n    progress: statusData.progress || 0\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-is-ready",
+      "name": "✔️ Video đã hoàn thành?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [1920, 0],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-succeeded",
+              "leftValue": "={{ $json.status }}",
+              "rightValue": "SUCCEEDED",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-check-timeout",
+      "name": "⚠️ Timeout? (max 10 lần)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [2160, 120],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-poll",
+              "leftValue": "={{ $json.pollCount }}",
+              "rightValue": 10,
+              "operator": {
+                "type": "number",
+                "operation": "lt"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-wait-retry",
+      "name": "⏳ Chờ thêm (30 giây)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2400, 0],
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "webhookId": "wait-retry-webhook"
+    },
+    {
+      "id": "node-log-timeout",
+      "name": "❌ Ghi log Timeout",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [2400, 240],
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "field-error",
+              "name": "error",
+              "value": "=Video generation timeout sau {{ $json.pollCount }} lần thử cho prompt: {{ $json.videoPrompt }}",
+              "type": "string"
+            },
+            {
+              "id": "field-status",
+              "name": "finalStatus",
+              "value": "TIMEOUT",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "sticky-social-media",
+      "name": "📱 Social Media Section",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [2140, -200],
+      "parameters": {
+        "content": "**📱 Đăng lên Social Media**\nSau khi video sẵn sàng:\n1. Upload lên Facebook Reels\n2. Upload lên TikTok\n\nCần chuẩn bị:\n- Facebook: Page Access Token + Page ID\n- TikTok: OAuth Access Token"
+      }
+    },
+    {
+      "id": "node-facebook-init",
+      "name": "📘 Khởi tạo upload Facebook Reels",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, -120],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $vars.FACEBOOK_PAGE_ID }}/video_reels",
+        "sendBody": true,
+        "bodyContentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "upload_phase",
+              "value": "start"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $vars.FACEBOOK_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-facebook-upload",
+      "name": "📤 Upload Video lên Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, -120],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('📘 Khởi tạo upload Facebook Reels').item.json.upload_url }}",
+        "sendBody": true,
+        "bodyContentType": "raw",
+        "contentType": "application/octet-stream",
+        "options": {
+          "redirect": {
+            "redirect": {
+              "followRedirects": true,
+              "maxRedirects": 5
+            }
+          }
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "file_url",
+              "value": "={{ $('🔗 Merge dữ liệu').item.json.videoUrl }}"
+            },
+            {
+              "name": "Authorization",
+              "value": "=OAuth {{ $vars.FACEBOOK_PAGE_ACCESS_TOKEN }}"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "node-facebook-upload-url",
+      "name": "📤 Upload Video URL Facebook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2880, -240],
+      "parameters": {
+        "method": "POST",
+        "url": "=https://graph.facebook.com/v19.0/{{ $vars.FACEBOOK_PAGE_ID }}/video_reels",
+        "sendBody": true,
+        "bodyContentType": "form-urlencoded",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "upload_phase",
+              "value": "finish"
+            },
+            {
+              "name": "access_token",
+              "value": "={{ $vars.FACEBOOK_PAGE_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "video_id",
+              "value": "={{ $('📘 Khởi tạo upload Facebook Reels').item.json.video_id }}"
+            },
+            {
+              "name": "description",
+              "value": "={{ $('🔗 Merge dữ liệu').item.json.caption + '\n\n' + $('🔗 Merge dữ liệu').item.json.hashtags }}"
+            },
+            {
+              "name": "published",
+              "value": "true"
+            },
+            {
+              "name": "video_state",
+              "value": "PUBLISHED"
+            }
+          ]
+        },
+        "options": {}
+      }
+    },
+    {
+      "id": "node-tiktok-upload",
+      "name": "📱 Đăng lên TikTok",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2640, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/video/init/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.TIKTOK_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=UTF-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={\n  \"post_info\": {\n    \"title\": \"{{ $('🔗 Merge dữ liệu').item.json.caption.replace(/\"/g, \"'\") }} {{ $('🔗 Merge dữ liệu').item.json.hashtags }}\",\n    \"privacy_level\": \"PUBLIC_TO_EVERYONE\",\n    \"disable_duet\": false,\n    \"disable_comment\": false,\n    \"disable_stitch\": false,\n    \"video_cover_timestamp_ms\": 1000\n  },\n  \"source_info\": {\n    \"source\": \"PULL_FROM_URL\",\n    \"video_url\": \"{{ $('🔗 Merge dữ liệu').item.json.videoUrl }}\"\n  }\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-tiktok-check",
+      "name": "⏳ Chờ TikTok xử lý (30s)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [2880, 120],
+      "parameters": {
+        "amount": 30,
+        "unit": "seconds"
+      },
+      "webhookId": "wait-tiktok-webhook"
+    },
+    {
+      "id": "node-tiktok-status",
+      "name": "🔍 Kiểm tra TikTok Post",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [3120, 120],
+      "parameters": {
+        "method": "POST",
+        "url": "https://open.tiktokapis.com/v2/post/publish/status/fetch/",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $vars.TIKTOK_ACCESS_TOKEN }}"
+            },
+            {
+              "name": "Content-Type",
+              "value": "application/json; charset=UTF-8"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyContentType": "json",
+        "jsonBody": "={\n  \"publish_id\": \"{{ $('📱 Đăng lên TikTok').item.json.data.publish_id }}\"\n}",
+        "options": {}
+      }
+    },
+    {
+      "id": "node-aggregate-results",
+      "name": "📊 Tổng hợp kết quả",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [3360, 0],
+      "parameters": {
+        "jsCode": "const items = $input.all();\n\nconst results = items.map(item => {\n  const data = item.json;\n  return {\n    videoIndex: data.videoIndex || 'N/A',\n    status: 'SUCCESS',\n    videoUrl: data.videoUrl || 'N/A',\n    facebookStatus: 'PUBLISHED',\n    tiktokPublishId: data.publish_id || 'N/A',\n    timestamp: new Date().toISOString()\n  };\n});\n\nreturn [{\n  json: {\n    message: `Đã xử lý ${results.length} video thành công!`,\n    results,\n    completedAt: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-response-success",
+      "name": "✅ Trả về kết quả thành công",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [3600, 0],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 200
+        }
+      }
+    },
+    {
+      "id": "node-error-handler",
+      "name": "🚨 Xử lý lỗi",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1680, 300],
+      "parameters": {
+        "jsCode": "const error = $input.first();\nreturn [{\n  json: {\n    error: true,\n    message: error.json?.message || 'Có lỗi xảy ra trong quá trình xử lý',\n    timestamp: new Date().toISOString()\n  }\n}];"
+      }
+    },
+    {
+      "id": "node-response-error",
+      "name": "⛔ Trả về lỗi",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [1920, 300],
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "responseCode": 500
+        }
+      }
+    },
+    {
+      "id": "node-next-batch",
+      "name": "➡️ Video tiếp theo?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [3600, -240],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "cond-has-next",
+              "leftValue": "={{ $('🔄 Xử lý từng Video').context.noItemsLeft }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      }
+    }
+  ],
+  "connections": {
+    "📥 Nhận Ảnh (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "✅ Validate & Chuẩn bị dữ liệu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✅ Validate & Chuẩn bị dữ liệu": {
+      "main": [
+        [
+          {
+            "node": "🔄 Xử lý từng Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔄 Xử lý từng Video": {
+      "main": [
+        [
+          {
+            "node": "🎬 Tạo Video (RunwayML)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🎬 Tạo Video (RunwayML)": {
+      "main": [
+        [
+          {
+            "node": "💾 Lưu Task ID",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "💾 Lưu Task ID": {
+      "main": [
+        [
+          {
+            "node": "⏳ Chờ xử lý (45 giây)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏳ Chờ xử lý (45 giây)": {
+      "main": [
+        [
+          {
+            "node": "🔍 Kiểm tra trạng thái Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Kiểm tra trạng thái Video": {
+      "main": [
+        [
+          {
+            "node": "🔗 Merge dữ liệu",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔗 Merge dữ liệu": {
+      "main": [
+        [
+          {
+            "node": "✔️ Video đã hoàn thành?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "✔️ Video đã hoàn thành?": {
+      "main": [
+        [
+          {
+            "node": "📘 Khởi tạo upload Facebook Reels",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "📱 Đăng lên TikTok",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "⚠️ Timeout? (max 10 lần)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⚠️ Timeout? (max 10 lần)": {
+      "main": [
+        [
+          {
+            "node": "⏳ Chờ thêm (30 giây)",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "❌ Ghi log Timeout",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏳ Chờ thêm (30 giây)": {
+      "main": [
+        [
+          {
+            "node": "🔍 Kiểm tra trạng thái Video",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📘 Khởi tạo upload Facebook Reels": {
+      "main": [
+        [
+          {
+            "node": "📤 Upload Video URL Facebook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📤 Upload Video URL Facebook": {
+      "main": [
+        [
+          {
+            "node": "📊 Tổng hợp kết quả",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📱 Đăng lên TikTok": {
+      "main": [
+        [
+          {
+            "node": "⏳ Chờ TikTok xử lý (30s)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "⏳ Chờ TikTok xử lý (30s)": {
+      "main": [
+        [
+          {
+            "node": "🔍 Kiểm tra TikTok Post",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "🔍 Kiểm tra TikTok Post": {
+      "main": [
+        [
+          {
+            "node": "📊 Tổng hợp kết quả",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "📊 Tổng hợp kết quả": {
+      "main": [
+        [
+          {
+            "node": "✅ Trả về kết quả thành công",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "meta": {
+    "templateId": "image-to-social-video-v1",
+    "description": "Tạo nhiều video từ 1 ảnh bằng RunwayML AI và tự đăng lên Facebook Reels + TikTok"
+  }
+}
